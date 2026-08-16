@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Argus &mdash; Agentic Blockchain Intelligence</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+</head>
+<body>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">&#9679;</span>
+      <div>
+        <h1>Argus</h1>
+        <p class="tagline">Agentic Blockchain Intelligence</p>
+      </div>
+    </div>
+    <div class="topbar-status">
+      <span class="status-dot" id="rpc-dot"></span>
+      <span id="rpc-label">checking RPC&hellip;</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Investigation launcher -->
+    <section class="panel launch-panel">
+      <label class="label" for="query">Investigation request</label>
+      <textarea id="query" rows="3"
+        placeholder="Investigate this wallet and flag any unusual activity">Investigate this wallet and summarize its recent activity, important transactions, token transfers, and unusual behavior.</textarea>
+
+      <div class="address-row">
+        <div class="field">
+          <label class="label" for="address">Ethereum address <span class="hint">(optional &mdash; can be embedded in the query)</span></label>
+          <input id="address" type="text" placeholder="0x..." spellcheck="false" />
+        </div>
+        <button id="run" class="btn primary">Start investigation</button>
+      </div>
+      <p class="error-text" id="api-error" hidden></p>
+    </section>
+
+    <!-- Agent execution view -->
+    <section id="execution" hidden>
+      <div class="exec-header">
+        <h2 id="exec-title">Investigation</h2>
+        <div class="status-pill" id="status-pill">queued</div>
+      </div>
+      <p class="subject" id="subject"></p>
+
+      <div class="grid two-col">
+        <!-- Timeline -->
+        <section class="panel">
+          <h3 class="panel-title">Agent activity</h3>
+          <ol class="timeline" id="timeline"></ol>
+        </section>
+
+        <!-- Findings -->
+        <section class="panel">
+          <h3 class="panel-title">Findings</h3>
+          <div id="findings" class="findings"></div>
+          <div id="no-findings" class="empty" hidden>No findings surfaced for this window.</div>
+        </section>
+      </div>
+
+      <!-- Transactions -->
+      <section class="panel">
+        <h3 class="panel-title">Observed transactions <span class="hint">(evidence ledger)</span></h3>
+        <div class="table-wrap">
+          <table id="tx-table">
+            <thead>
+              <tr>
+                <th>TX HASH</th><th>DIR</th><th>COUNTERPARTY</th>
+                <th>VALUE (ETH)</th><th>BLOCK</th><th>STATUS</th><th>EVIDENCE</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Evidence ledger -->
+      <section class="panel">
+        <h3 class="panel-title">Evidence ledger</h3>
+        <ol class="evidence-list" id="evidence-list"></ol>
+      </section>
+
+      <!-- Report -->
+      <section class="panel report">
+        <h3 class="panel-title">Investigation report</h3>
+        <div id="report-body"></div>
+      </section>
+    </section>
+
+    <div id="empty-state" class="empty hero-empty">
+      <p>Submit an investigation to begin.</p>
+      <p class="hint">Example: <code>0x0f52fD2320D48E4f2cBdF29196BdBAa65e0E1D04</code></p>
+    </div>
+  </main>
+
+  <footer class="footer">
+    Read-only, evidence-backed blockchain investigation. No transactions are ever created or signed.
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

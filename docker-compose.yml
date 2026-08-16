@@ -1,0 +1,37 @@
+# Build and run Argus with Docker Compose.
+#
+#   docker compose up --build
+#
+# Provide backend/.env (copy from .env.example) with at least ETH_RPC_URL.
+# PostgreSQL services are optional (Phase 2 persistence / Phase 2+ RAG);
+# they are declared but unused by the MVP core so they can be enabled
+# behind a documented adapter without changing application code.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      FRONTEND_DIR: ../frontend
+    restart: unless-stopped
+
+  # Optional - not wired into the MVP application flow.
+  # persistence:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_USER: argus
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argus}
+  #     POSTGRES_DB: argus
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - argus_pg:/var/lib/postgresql/data
+  #
+  # volumes:
+  #   argus_pg:
