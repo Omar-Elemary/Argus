@@ -60,7 +60,9 @@ class Settings(BaseSettings):
 
     # Cursor Cloud Agents API (alternative to OpenAI-compatible endpoints)
     cursor_api_key: str = ""
-    cursor_base_url: str = "https://api.cursor.com/v1"
+    cursor_base_url: str = "https://api.cursor.com/v0"
+    # GitHub repo the Cursor key can access - cloud agents run against it
+    cursor_repository: str = ""
 
     # Analysis thresholds
     large_tx_threshold_eth: float = 10.0

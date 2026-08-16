@@ -103,4 +103,6 @@ class InvestigationRecord(BaseModel):
 
     def public(self) -> dict[str, Any]:
         """Shape the record for API responses (JSON-safe)."""
-        return self.model_dump(mode="json")
+        payload = self.model_dump(mode="json")
+        payload["investigation_id"] = self.id
+        return payload

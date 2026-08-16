@@ -62,57 +62,110 @@ class OpenAICompatibleProvider:
 class CursorCloudAgentProvider:
     """Runs the narration through Cursor's Cloud Agents API.
 
-    Cursor exposes a Cloud Agents API (``api.cursor.com``) rather than a
-    plain chat-completions endpoint. We drive it in "no-repo agent"
-    mode: create an agent with the narration prompt, poll its first run
-    until it finishes, and return the resulting reply. This is a real
+    Cursor exposes a run-based Cloud Agents API (``api.cursor.com/v0``)
+    rather than a plain chat-completions endpoint. We launch an agent
+    against the configured ``CURSOR_REPOSITORY``, poll its status until
+    it finishes, and return the resulting reply. This is a real
     LLM-backed narrative produced by a real cloud agent.
 
-    Configure with ``LLM_PROVIDER=cursor`` plus ``CURSOR_API_KEY``.
+    Configure with ``LLM_PROVIDER=cursor`` plus ``CURSOR_API_KEY`` and
+    ``CURSOR_REPOSITORY`` (a GitHub repository the API key can access).
     """
 
     name = "cursor-cloud-agent"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.base_url = (settings.cursor_base_url or "https://api.cursor.com/v1").rstrip("/")
+        self.base_url = self._normalize_base(
+            settings.cursor_base_url or "https://api.cursor.com"
+        )
         self.api_key = settings.cursor_api_key
+        self.repository = settings.cursor_repository
         self.model = settings.llm_model or None
+
+    @staticmethod
+    def _normalize_base(base_url: str) -> str:
+        """Return the host base (strip any /v0 or /v1 path segment)."""
+        base = base_url.rstrip("/")
+        if base.endswith("/v1"):
+            return base[:-3]
+        if base.endswith("/v0"):
+            return base[:-3]
+        return base
 
     def chat(self, *, system: str, user: str) -> str:
         import time
 
         import httpx
 
+        if not self.repository:
+            raise RuntimeError(
+                "CURSOR_REPOSITORY is not set. Point it at a GitHub repository "
+                "the Cursor API key can access (e.g. https://github.com/<you>/Argus)."
+            )
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        body: dict[str, Any] = {"prompt": {"text": f"{system}\n\n{user}"}}
+        body: dict[str, Any] = {
+            "prompt": {"text": f"{system}\n\n{user}"},
+            "source": {"repository": self.repository, "ref": "main"},
+            "target": {"autoCreatePr": False},
+        }
         if self.model:
             body["model"] = {"id": self.model}
 
-        with httpx.Client(timeout=90) as client:
-            create = client.post(f"{self.base_url}/agents", json=body, headers=headers)
+        with httpx.Client(timeout=120) as client:
+            create = client.post(f"{self.base_url}/v0/agents", json=body, headers=headers)
             create.raise_for_status()
             payload = create.json()
-            agent_id = payload["agent"]["id"]
-            run_id = payload["run"]["id"]
+            agent_id = (payload.get("agent") or {}).get("id") or payload.get("id")
+            if not agent_id:
+                raise RuntimeError(f"Cursor API did not return an agent id: {payload}")
 
-            deadline = time.monotonic() + 240
+            deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
-                time.sleep(3)
+                time.sleep(5)
                 run = client.get(
-                    f"{self.base_url}/agents/{agent_id}/runs/{run_id}",
-                    headers=headers,
+                    f"{self.base_url}/v0/agents/{agent_id}", headers=headers
                 )
                 run.raise_for_status()
-                status = run.json().get("status")
+                data = run.json()
+                status = (data.get("agent") or {}).get("status") or data.get("status")
                 if status == "FINISHED":
-                    return run.json().get("result") or ""
-                if status in ("ERROR", "CANCELLED", "EXPIRED"):
-                    raise RuntimeError(f"Cursor agent run ended with status {status}")
+                    return self._read_result(client, agent_id, data, headers)
+                if status in ("ERROR", "STOPPED", "CANCELLED", "EXPIRED"):
+                    raise RuntimeError(f"Cursor agent run ended with status {status}: {data}")
             raise TimeoutError("Cursor cloud agent run did not finish in time")
+
+    def _read_result(
+        self,
+        client: Any,
+        agent_id: str,
+        data: dict[str, Any],
+        headers: dict[str, str],
+    ) -> str:
+        """Return the finished agent's reply text (status or conversation)."""
+        result = (data.get("agent") or {}).get("result") or data.get("result")
+        if isinstance(result, str) and result.strip():
+            return result.strip()
+        try:
+            conv = client.get(
+                f"{self.base_url}/v0/agents/{agent_id}/conversation", headers=headers
+            )
+            conv.raise_for_status()
+            messages = conv.json().get("messages", [])
+            for msg in reversed(messages):
+                text = msg.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to read Cursor conversation; returning empty result.",
+                exc_info=True,
+            )
+        return ""
 
 
 class DeterministicFallbackProvider:

@@ -12,6 +12,7 @@ def _cursor_settings(**overrides):
     return build_settings(
         llm_provider="cursor",
         cursor_api_key="crsr_testkey",
+        cursor_repository="https://github.com/example/Argus",
         **overrides,
     )
 
@@ -57,6 +58,11 @@ def test_cursor_provider_returns_finished_result():
     body = kwargs["json"]
     assert body["prompt"]["text"].startswith("sys")
     assert "user" in body["prompt"]["text"]
+    assert body["source"] == {
+        "repository": "https://github.com/example/Argus",
+        "ref": "main",
+    }
+    assert body["target"] == {"autoCreatePr": False}
     assert "model" not in body
 
 
