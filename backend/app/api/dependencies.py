@@ -1,102 +1,58 @@
-"""FastAPI dependency bag.
-
-Services are constructed lazily so the API can boot even when the RPC
-endpoint is misconfigured; the health endpoint reports the real state
-and investigate endpoints return a clear 503 until it is fixed.
-"""
+"""FastAPI dependencies: settings, current user, LLM (reused protocol)."""
 
 from __future__ import annotations
 
-import logging
-import threading
-from dataclasses import dataclass, field
-from functools import lru_cache
+from dataclasses import dataclass
 
-from app.blockchain.indexer import build_indexer
-from app.blockchain.provider import (
-    BlockchainProvider,
-    EthereumNodeProvider,
-    NodeMisconfigured,
-    NoopProvider,
-)
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config.settings import Settings
-from app.services.investigation_service import InvestigationService
+from app.db.session import get_db
+from app.models.user import User
+from app.security.tokens import TokenError, decode_access_token
+from app.services import auth_service
 from app.services.llm.llm_provider import LLM, build_llm
-from app.tools.blockchain_tools import ToolRuntime
 
-logger = logging.getLogger("argus.api.dependencies")
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_settings_dep(request: Request) -> Settings:
+    return request.app.state.settings
 
 
 @dataclass
 class DependencyBag:
+    """Kept from Argus: a small bag of process-wide services (LLM, settings)."""
+
     settings: Settings
     llm: LLM | None = None
-    chain: str = "sepolia"
-    _runtime: ToolRuntime | None = None
-    _service: InvestigationService | None = None
-    _lock: threading.RLock = field(default_factory=threading.RLock)
-    _runtime_error: str | None = None
 
     @classmethod
     def build(cls, settings: Settings) -> DependencyBag:
-        return cls(settings=settings, llm=build_llm(settings), chain=settings.eth_network)
-
-    def runtime_last_error(self) -> str | None:
-        return self._runtime_error
-
-    def get_runtime(self) -> ToolRuntime:
-        """Create (once) and return the tool runtime; raises on failure."""
-        if self._runtime is not None:
-            return self._runtime
-        with self._lock:
-            if self._runtime is not None:
-                return self._runtime
-            try:
-                provider: BlockchainProvider = EthereumNodeProvider(self.settings)
-                indexer = build_indexer(self.settings, provider)
-                self._runtime = ToolRuntime(
-                    provider=provider,
-                    indexer=indexer,
-                    settings=self.settings,
-                )
-                self._runtime_error = None
-            except NodeMisconfigured as exc:  # noqa: BLE001
-                # If no RPC is configured, fall back to a noop provider so the
-                # API can still run (features will be limited/offline).
-                if not self.settings.eth_rpc_url:
-                    provider = NoopProvider(self.settings)
-                    indexer = build_indexer(self.settings, provider)
-                    self._runtime = ToolRuntime(
-                        provider=provider,
-                        indexer=indexer,
-                        settings=self.settings,
-                    )
-                    self._runtime_error = None
-                else:
-                    self._runtime_error = str(exc)
-                    raise
-            except Exception as exc:  # noqa: BLE001
-                self._runtime_error = str(exc)
-                raise
-        return self._runtime
-
-    def get_service(self) -> InvestigationService:
-        if self._service is None:
-            runtime = self.get_runtime()
-            self._service = InvestigationService(
-                runtime=runtime,
-                llm=self.llm,
-                settings=self.settings,
-                chain=self.settings.eth_network,
-            )
-        return self._service
+        return cls(settings=settings, llm=build_llm(settings))
 
 
-@lru_cache(maxsize=1)
-def build_bag() -> DependencyBag:
-    """Return a singleton DependencyBag so services (and investigations)
-    persist across requests during a single server process.
-    """
-    from app.config.settings import get_settings
+def get_bag(request: Request) -> DependencyBag:
+    return request.app.state.bag
 
-    return DependencyBag.build(get_settings())
+
+async def get_current_user(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> User:
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+    settings: Settings = request.app.state.settings
+    try:
+        user_id = decode_access_token(creds.credentials, settings)
+    except TokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token."
+        ) from exc
+    user = await auth_service.get_user_by_id(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+    return user

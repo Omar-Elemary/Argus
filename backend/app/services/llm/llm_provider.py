@@ -1,13 +1,12 @@
 """Pluggable LLM provider.
 
-The agent pipeline is fully functional without an LLM: every factual
-claim is computed deterministically from on-chain evidence. The LLM is
-used *only* to narrate investigation results into readable prose.
+Agents never import a vendor SDK. They depend on the ``LLM`` protocol.
+Phase 1 reuses the Argus adapters: OpenAI-compatible endpoints, Cursor
+Cloud Agents, and a deterministic fallback for tests. The fallback is
+not an AI employee — Phase 4 execution must fail closed when a real
+provider is required.
 
-Provide ``LLM_PROVIDER`` (openai/auto -> any OpenAI-compatible
-endpoint, cursor -> Cursor Cloud Agents, none -> deterministic
-fallback) plus the matching keys via the environment. No keys are ever
-hard-coded.
+Configuration is environment-driven. No keys are ever hard-coded.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from typing import Any, Protocol
 
 from app.config.settings import Settings
 
-logger = logging.getLogger("argus.llm")
+logger = logging.getLogger("fellows.llm")
 
 
 class LLM(Protocol):
@@ -169,11 +168,10 @@ class CursorCloudAgentProvider:
 
 
 class DeterministicFallbackProvider:
-    """No-LLM fallback used for tests and demos without an API key.
+    """No-LLM fallback used for tests without an API key.
 
-    It reads the structured ``DATA:`` JSON that the agents pass in and
-    emits a concise, factual summary - deterministic and repeatable.
-    This is a graceful degradation, not a "fake model".
+    Graceful degradation for wiring tests — not an AI employee. Phase 4
+    execution must fail closed when a real provider is required.
     """
 
     name = "deterministic-fallback"
@@ -199,27 +197,13 @@ def _extract_json(user: str) -> Any:
 
 def _summarise(data: Any) -> str:
     if not isinstance(data, dict):
-        return "Investigation completed with structured evidence."
+        return "Structured context received."
     parts: list[str] = []
-    if data.get("subject"):
-        parts.append(f"Investigation subject: {data['subject']}")
-    if data.get("tx_count") is not None:
-        parts.append(
-            f"Observed {data['tx_count']} transactions across a {data.get('window_blocks', 'bounded')}-block window."
-        )
-    if data.get("balance_eth") is not None:
-        parts.append(f"Current ETH balance is {data['balance_eth']:.4f}.")
-    if data.get("total_in_eth") is not None:
-        parts.append(f"Approx. ETH inflow {data['total_in_eth']:.4f} and outflow {data.get('total_out_eth', 0.0):.4f}.")
-    findings = data.get("findings", [])
-    if findings:
-        parts.append(f"{len(findings)} evidence-linked finding(s) were recorded.")
-        for finding in findings[:3]:
-            refs = finding.get("evidence_count", len(finding.get("evidence_ids", [])))
-            parts.append(
-                f"- [{finding.get('severity', 'informational')}] {finding.get('title', '')} ({refs} evidence references)."
-            )
-    return "\n".join(parts)
+    if data.get("summary"):
+        parts.append(str(data["summary"]))
+    if data.get("task"):
+        parts.append(f"Task: {data['task']}")
+    return "\n".join(parts) or "Structured context received."
 
 
 def build_llm(settings: Settings) -> LLM | None:

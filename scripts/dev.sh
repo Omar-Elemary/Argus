@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the Argus backend in development mode (auto-reload).
+# Run the Fellows API in development mode (auto-reload).
 set -euo pipefail
 cd "$(dirname "$0")/../backend"
 export PYTHONPATH="."
